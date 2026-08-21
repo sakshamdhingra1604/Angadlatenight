@@ -15,7 +15,11 @@ object DomainFeatureExtractor {
         "login", "signin", "verify", "verification", "secure", "account", "banking",
         "update", "support", "confirm", "password", "wallet", "auth", "billing",
         "service", "portal", "admin", "recover", "token", "security", "appleid",
-        "paypal", "netflix", "microsoft", "google", "amazon", "facebook"
+        "paypal", "netflix", "microsoft", "google", "amazon", "facebook",
+        "souscription", "subscription", "subscribe", "prim", "prime", "recharge",
+        "kyc", "remboursement", "facture", "compte", "connexion", "colis",
+        "livraison", "reward", "claim", "free", "gift", "bonus", "winner",
+        "prize", "cashback", "coupon"
     )
 
     private val POPULAR_BRANDS = setOf(
@@ -141,7 +145,8 @@ object DomainFeatureExtractor {
 
         // 27-28: TLD Risk & Keywords
         features[27] = if (RISKY_TLDS.any { host.endsWith(it) }) 1.0f else 0.0f
-        val kwCount = SUSPICIOUS_KEYWORDS.count { rawUrl.lowercase().contains(it) }
+        val tokens = rawUrl.lowercase().split('.', '-', '_', '/', '?', '=', '&', '@', ':').filter { it.isNotBlank() }
+        val kwCount = SUSPICIOUS_KEYWORDS.count { kw -> tokens.any { it == kw || (kw.length >= 6 && it.contains(kw)) } }
         features[28] = (kwCount.toFloat() / 4f).coerceIn(0f, 1f)
 
         // 29-31: Brand checks (detects brand impersonation like verify-paypal-account.tk)

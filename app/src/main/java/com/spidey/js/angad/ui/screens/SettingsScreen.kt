@@ -6,7 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -75,14 +75,86 @@ fun SettingsScreen() {
                 }
             }
 
-            SettingsSection("SYSTEM") {
-                SettingsItem("Main Model", "CICIDS2017 Core (65 Params)")
-                SettingsItem("Ensemble Model", "ShieldNet v1.0 (42 Params)")
-                SettingsItem("Check for Updates", "Last checked: Today, 10:45 AM")
+            var showClearDialog by remember { mutableStateOf(false) }
+            val database = remember { com.spidey.js.angad.db.AngadDatabase.getDatabase(context) }
+            var resetSuccess by remember { mutableStateOf(false) }
+
+            SettingsSection("DATA & PRIVACY") {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Automatic 7-Day Cleanup", style = MaterialTheme.typography.titleMedium, color = AncientWhite)
+                            Text("Logs older than 7 days are auto-purged from phone storage", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                        }
+                        Text("ACTIVE", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = { showClearDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = LavaCrimson.copy(alpha = 0.2f)),
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, LavaCrimson.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, tint = LavaCrimson, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("CLEAR ALL LOGS & RESET DATA", color = LavaCrimson, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+
+                    if (resetSuccess) {
+                        Text(
+                            text = "✓ All logs cleared and reset to 0",
+                            color = Color(0xFF4CAF50),
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            }
+
+            if (showClearDialog) {
+                AlertDialog(
+                    onDismissRequest = { showClearDialog = false },
+                    title = { Text("Reset All Logs & Traffic Data?", color = AncientWhite, fontWeight = FontWeight.Bold) },
+                    text = { Text("This will permanently delete all recorded DNS events, blocks, and counters from your device storage and reset everything to 0.", color = TextMuted) },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    database.dnsEventDao().clearAll()
+                                    resetSuccess = true
+                                    showClearDialog = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LavaCrimson)
+                        ) {
+                            Text("RESET TO 0", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showClearDialog = false }) {
+                            Text("CANCEL", color = TextMuted)
+                        }
+                    },
+                    containerColor = TempleSurface,
+                    shape = RoundedCornerShape(16.dp)
+                )
+            }
+
+            SettingsSection("SYSTEM MODELS") {
+                SettingsItem("Network Guard", "CICIDS2017 Deep Classifier (M1)")
+                SettingsItem("ShieldNet AI", "ShieldNet Quantized Dynamic (M2)")
+                SettingsItem("PayloadNet", "DNS Byte Pattern Classifier (M3)")
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Text(text = "Angad Firewall v1.0.0", style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.CenterHorizontally), color = TextMuted)
+            Text(text = "ANGAD Dharma Protection Engine v1.0.0", style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.CenterHorizontally), color = TextMuted)
         }
     }
 }

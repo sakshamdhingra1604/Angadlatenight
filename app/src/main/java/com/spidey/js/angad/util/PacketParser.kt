@@ -109,7 +109,7 @@ object PacketParser {
         response[idx++] = 0x00.toByte()
         response[idx++] = 0x00.toByte()
         response[idx++] = 0x00.toByte()
-        response[idx++] = 0x3C.toByte() // TTL 60s
+        response[idx++] = 0x00.toByte() // TTL 0s (prevents browser DNS caching)
         response[idx++] = 0x00.toByte()
         response[idx++] = 0x04.toByte() // RDLENGTH 4
         response[idx++] = 0x00.toByte() // 0.0.0.0 (Sinkhole)
@@ -117,5 +117,63 @@ object PacketParser {
         response[idx++] = 0x00.toByte()
         response[idx++] = 0x00.toByte()
         return response
+    }
+
+    /**
+     * Parses the first resolved IPv4 (Type A) address from a DNS response packet.
+     */
+    fun parseDnsResponseIp(data: ByteArray, offset: Int, length: Int): String? {
+        if (length < 12) return null
+        try {
+            val buffer = ByteBuffer.wrap(data, offset, length)
+            val flags = buffer.getShort(2).toInt() and 0xFFFF
+            // Must be a DNS response (QR bit = 1)
+            if ((flags and 0x8000) == 0) return null
+            val qdCount = buffer.getShort(4).toInt() and 0xFFFF
+            val anCount = buffer.getShort(6).toInt() and 0xFFFF
+            if (anCount <= 0) return null
+
+            // Skip Question Section
+            var pos = 12
+            for (q in 0 until qdCount) {
+                while (pos < length) {
+                    val len = data[offset + pos].toInt() and 0xFF
+                    if (len == 0) { pos++; break }
+                    if ((len and 0xC0) == 0xC0) { pos += 2; break }
+                    pos += 1 + len
+                }
+                pos += 4 // Type (2) + Class (2)
+            }
+
+            // Parse Answer Section
+            for (a in 0 until anCount) {
+                if (pos >= length) break
+                val firstByte = data[offset + pos].toInt() and 0xFF
+                if ((firstByte and 0xC0) == 0xC0) {
+                    pos += 2
+                } else {
+                    while (pos < length) {
+                        val len = data[offset + pos].toInt() and 0xFF
+                        if (len == 0) { pos++; break }
+                        if ((len and 0xC0) == 0xC0) { pos += 2; break }
+                        pos += 1 + len
+                    }
+                }
+                if (pos + 10 > length) break
+                val type = ((data[offset + pos].toInt() and 0xFF) shl 8) or (data[offset + pos + 1].toInt() and 0xFF)
+                val rdLength = ((data[offset + pos + 8].toInt() and 0xFF) shl 8) or (data[offset + pos + 9].toInt() and 0xFF)
+                pos += 10
+
+                if (type == 1 && rdLength == 4 && pos + 4 <= length) { // Type A (IPv4)
+                    val ip0 = data[offset + pos].toInt() and 0xFF
+                    val ip1 = data[offset + pos + 1].toInt() and 0xFF
+                    val ip2 = data[offset + pos + 2].toInt() and 0xFF
+                    val ip3 = data[offset + pos + 3].toInt() and 0xFF
+                    return "$ip0.$ip1.$ip2.$ip3"
+                }
+                pos += rdLength
+            }
+        } catch (e: Exception) {}
+        return null
     }
 }

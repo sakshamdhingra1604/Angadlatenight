@@ -60,8 +60,14 @@ fun SecurityInsightSheet(event: DnsEvent, onDismiss: () -> Unit) {
             RiskGauge(score = event.riskScore.toFloat())
             Spacer(modifier = Modifier.height(16.dp))
             
+            val resolvedIp = metadataMap["IP"] ?: ""
             Text(text = event.domain, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.White)
-            Text(text = "Accessed by ${event.appLabel}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "Accessed by ${event.appLabel}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                if (resolvedIp.isNotBlank()) {
+                    Text(text = " · IP: $resolvedIp", style = MaterialTheme.typography.bodyMedium, color = RoyalGold.copy(alpha = 0.8f))
+                }
+            }
             
             Spacer(modifier = Modifier.height(24.dp))
             

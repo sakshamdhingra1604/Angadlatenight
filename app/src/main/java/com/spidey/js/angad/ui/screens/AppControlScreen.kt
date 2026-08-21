@@ -39,17 +39,19 @@ fun AppControlScreen() {
     var selectedFilter by remember { mutableStateOf("All") }
     val filters = listOf("All", "Allowed", "Blocked", "System")
 
-    val apps = remember {
-        val pm = context.packageManager
-        pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { it.packageName != context.packageName }
-            .map { app ->
-                AppData(
-                    name = pm.getApplicationLabel(app).toString(),
-                    packageName = app.packageName,
-                    isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                )
-            }.sortedBy { it.name }
+    val apps by produceState<List<AppData>>(initialValue = emptyList()) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val pm = context.packageManager
+            pm.getInstalledApplications(PackageManager.GET_META_DATA)
+                .filter { it.packageName != context.packageName }
+                .map { app ->
+                    AppData(
+                        name = pm.getApplicationLabel(app).toString(),
+                        packageName = app.packageName,
+                        isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    )
+                }.sortedBy { it.name }
+        }
     }
 
     val filteredApps = apps.filter { app ->

@@ -153,8 +153,9 @@ class AngadModelEngine(private val context: Context) {
             // Domain Heuristic score (ensures network baseline doesn't stay 0 on obvious malicious patterns)
             val heuristicScore = (
                 (if (f41[27] > 0.5f) 0.35f else 0.0f) + // Risky TLD
-                (f41[28] * 0.40f) +                    // Phishing keywords
-                (if (f41[31] > 0.5f) 0.35f else 0.0f) + // Brand mismatch
+                (f41[28] * 0.60f) +                    // Phishing keywords
+                (if (f41[31] > 0.5f) 0.40f else 0.0f) + // Brand mismatch
+                (if (f41[5] > 0.08f && f41[28] > 0.0f) 0.35f else 0.0f) + // Hyphenated deceptive keywords (e.g. souscription-prim)
                 (if (f41[20] > 0.45f) 0.20f else 0.0f)  // High entropy
             ).coerceIn(0f, 1f)
             val effectiveScore1 = maxOf(score1, heuristicScore)

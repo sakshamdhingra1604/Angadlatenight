@@ -10,7 +10,7 @@ interface DnsEventDao {
     @Insert
     suspend fun insert(event: DnsEvent)
 
-    @Query("SELECT * FROM dns_events ORDER BY timestamp DESC LIMIT 100")
+    @Query("SELECT * FROM dns_events ORDER BY timestamp DESC")
     fun getAllEvents(): Flow<List<DnsEvent>>
 
     @Query("SELECT * FROM dns_events WHERE isThreat = 1 ORDER BY timestamp DESC")
@@ -24,6 +24,9 @@ interface DnsEventDao {
 
     @Query("SELECT COUNT(DISTINCT appPackage) FROM dns_events")
     fun getActiveAppsCount(): Flow<Int>
+
+    @Query("DELETE FROM dns_events WHERE timestamp < :cutoffTime")
+    suspend fun deleteOlderThan(cutoffTime: Long): Int
 
     @Query("DELETE FROM dns_events")
     suspend fun clearAll()

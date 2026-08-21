@@ -63,10 +63,22 @@ class ThreatAlertActivity : ComponentActivity() {
                         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                             prefManager.addToAllowlist(domain)
                         }
-                        Toast.makeText(this@ThreatAlertActivity, "✅ Domain whitelisted. You can reload the page.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@ThreatAlertActivity, "Domain allowed. Opening page...", Toast.LENGTH_SHORT).show()
+                        try {
+                            val url = if (domain.startsWith("http://") || domain.startsWith("https://")) domain else "https://$domain"
+                            val browserIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(browserIntent)
+                        } catch (e: Exception) {
+                            // Fallback if no browser or invalid scheme
+                        }
                         finish()
                     },
-                    onDismiss = { finish() }
+                    onDismiss = {
+                        // Returns user back to the previous screen/app where they were
+                        finish()
+                    }
                 )
             }
         }

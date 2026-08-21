@@ -168,16 +168,13 @@ class AngadVpnService : VpnService() {
                         } else {
                             result.mlVerdict
                         }
-                        logAndNotifyBlock(dnsQuestion.domain, appInfo, finalVerdict)
+                        logAndNotifyBlock(dnsQuestion.domain, appInfo, finalVerdict, "0.0.0.0")
                         val response = PacketParser.createSinkholeResponse(data, dnsOffset, dnsLen)
                         val ipResponse = buildIpUdpPacket(dstIp, dstPort, srcIp, srcPort, response, response.size)
-                        outputStream.write(ipResponse)
+                        withContext(Dispatchers.IO) { outputStream.write(ipResponse) }
                     } else {
-                        logDomainEvent(dnsQuestion.domain, "DNS", appInfo, result.mlVerdict, false)
-                        // SPEED FIX: Launch proxy in a separate job so we don't block the loop
-                        serviceScope.launch {
-                            proxyDnsQuery(data, dnsOffset, dnsLen, srcIp, srcPort, dstIp, dstPort, outputStream)
-                        }
+                        // Forward proxy and log with resolved IP from DNS answer
+                        proxyDnsQuery(data, dnsOffset, dnsLen, srcIp, srcPort, dstIp, dstPort, outputStream, dnsQuestion.domain, appInfo, result.mlVerdict)
                     }
                 }
             }
@@ -197,17 +194,17 @@ class AngadVpnService : VpnService() {
         return VerdictResult(ml, ml.score >= threshold)
     }
 
-    private fun logAndNotifyBlock(domain: String, app: AppInfo, verdict: AngadModelEngine.ModelVerdict) {
+    private fun logAndNotifyBlock(domain: String, app: AppInfo, verdict: AngadModelEngine.ModelVerdict, resolvedIp: String = "0.0.0.0") {
         serviceScope.launch {
             try {
-                val metadata = "M1_Score=${"%.2f".format(verdict.model1Score)};M2_Score=${"%.2f".format(verdict.model2Score)};M3_Score=${"%.2f".format(verdict.model3Score)};Reasons=${verdict.reasons.joinToString("|")};Features=${verdict.featureHighlights.map { "${it.key}=${"%.2f".format(it.value)}" }.joinToString(",")}"
+                val metadata = "IP=$resolvedIp;M1_Score=${"%.2f".format(verdict.model1Score)};M2_Score=${"%.2f".format(verdict.model2Score)};M3_Score=${"%.2f".format(verdict.model3Score)};Reasons=${verdict.reasons.joinToString("|")};Features=${verdict.featureHighlights.map { "${it.key}=${"%.2f".format(it.value)}" }.joinToString(",")}"
                 database.dnsEventDao().insert(DnsEvent(
                     domain = domain, appPackage = app.packageName, appLabel = app.label,
                     timestamp = System.currentTimeMillis(), queryType = "BLOCK",
                     isThreat = true, threatType = verdict.classification, riskScore = verdict.score.toDouble(),
                     aiMetadata = metadata
                 ))
-                Log.d(TAG, "Logged block event for: $domain")
+                Log.d(TAG, "Logged block event for: $domain (IP: $resolvedIp)")
                 if (prefManager.notificationsEnabled.first()) showBlockNotification(domain, app.label, verdict)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to log block event for $domain", e)
@@ -215,17 +212,17 @@ class AngadVpnService : VpnService() {
         }
     }
 
-    private fun logDomainEvent(domain: String, type: String, app: AppInfo, verdict: AngadModelEngine.ModelVerdict, isBlocked: Boolean) {
+    private fun logDomainEvent(domain: String, type: String, app: AppInfo, verdict: AngadModelEngine.ModelVerdict, isBlocked: Boolean, resolvedIp: String = "") {
         serviceScope.launch {
             try {
-                val metadata = "M1_Score=${"%.2f".format(verdict.model1Score)};M2_Score=${"%.2f".format(verdict.model2Score)};M3_Score=${"%.2f".format(verdict.model3Score)};Reasons=${verdict.reasons.joinToString("|")};Features=${verdict.featureHighlights.map { "${it.key}=${"%.2f".format(it.value)}" }.joinToString(",")}"
+                val metadata = "IP=$resolvedIp;M1_Score=${"%.2f".format(verdict.model1Score)};M2_Score=${"%.2f".format(verdict.model2Score)};M3_Score=${"%.2f".format(verdict.model3Score)};Reasons=${verdict.reasons.joinToString("|")};Features=${verdict.featureHighlights.map { "${it.key}=${"%.2f".format(it.value)}" }.joinToString(",")}"
                 database.dnsEventDao().insert(DnsEvent(
                     domain = domain, appPackage = app.packageName, appLabel = app.label,
                     timestamp = System.currentTimeMillis(), queryType = type,
                     isThreat = isBlocked, threatType = verdict.classification, riskScore = verdict.score.toDouble(),
                     aiMetadata = metadata
                 ))
-                Log.d(TAG, "Logged $type event for: $domain")
+                Log.d(TAG, "Logged $type event for: $domain (IP: $resolvedIp)")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to log $type event for $domain", e)
             }
@@ -235,8 +232,8 @@ class AngadVpnService : VpnService() {
     private fun showBlockNotification(domain: String, appLabel: String, verdict: AngadModelEngine.ModelVerdict) {
         val now = System.currentTimeMillis()
         val lastTime = notificationDebounce.get(domain) ?: 0L
-        if (now - lastTime < 60_000L) {
-            // Anti-Spam: Suppress duplicate notification within 60 seconds
+        if (now - lastTime < 3_000L) {
+            // Anti-Spam: Suppress duplicate notification within 3 seconds
             return
         }
         notificationDebounce.put(domain, now)
@@ -277,7 +274,19 @@ class AngadVpnService : VpnService() {
         getSystemService(NotificationManager::class.java)?.notify(domain.hashCode(), notification)
     }
 
-    private fun proxyDnsQuery(data: ByteArray, dnsOffset: Int, dnsLen: Int, srcIp: InetAddress, srcPort: Int, dstIp: InetAddress, dstPort: Int, outputStream: FileOutputStream) {
+    private fun proxyDnsQuery(
+        data: ByteArray,
+        dnsOffset: Int,
+        dnsLen: Int,
+        srcIp: InetAddress,
+        srcPort: Int,
+        dstIp: InetAddress,
+        dstPort: Int,
+        outputStream: FileOutputStream,
+        domain: String,
+        appInfo: AppInfo,
+        verdict: AngadModelEngine.ModelVerdict
+    ) {
         serviceScope.launch {
             try {
                 val socket = DatagramSocket()
@@ -287,10 +296,17 @@ class AngadVpnService : VpnService() {
                 val packet = DatagramPacket(buffer, buffer.size)
                 socket.soTimeout = 5000
                 socket.receive(packet)
+
+                // Parse the resolved IPv4 from DNS response
+                val resolvedIp = PacketParser.parseDnsResponseIp(packet.data, 0, packet.length) ?: ""
+                logDomainEvent(domain, "DNS", appInfo, verdict, false, resolvedIp)
+
                 val ipResponse = buildIpUdpPacket(dstIp, dstPort, srcIp, srcPort, packet.data, packet.length)
                 withContext(Dispatchers.IO) { outputStream.write(ipResponse) }
                 socket.close()
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                logDomainEvent(domain, "DNS", appInfo, verdict, false, "")
+            }
         }
     }
 

@@ -224,11 +224,11 @@ fun DivineShieldToggle(isActive: Boolean, onToggle: (Boolean) -> Unit) {
 fun DivineStats(scanned: Int, blocked: Int, apps: Int) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        DivineStatCard("Scanned", scanned.toString(), Modifier.weight(1f), RoyalGold)
-        DivineStatCard("Purged", blocked.toString(), Modifier.weight(1f), LavaCrimson)
-        DivineStatCard("Watched", apps.toString(), Modifier.weight(1f), DivineSaffron)
+        DivineStatCard("Links Touched", scanned.toString(), Modifier.weight(1f), RoyalGold)
+        DivineStatCard("Threats Blocked", blocked.toString(), Modifier.weight(1f), LavaCrimson)
+        DivineStatCard("Protected Apps", apps.toString(), Modifier.weight(1f), DivineSaffron)
     }
 }
 
