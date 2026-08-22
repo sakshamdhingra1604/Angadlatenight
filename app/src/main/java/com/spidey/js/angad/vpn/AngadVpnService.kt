@@ -84,6 +84,14 @@ class AngadVpnService : VpnService() {
     private fun startVpn() {
         startForeground(1, createNotification())
         try {
+            try {
+                val modelBytes = assets.open("flow_model.bin").readBytes()
+                com.sonusid.localvpntunnel.MLBridge.initEngine(modelBytes, ByteArray(0))
+                Log.d(TAG, "Native ML engine initialized successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize native ML engine", e)
+            }
+
             vpnInterface = Builder()
                 .addAddress("10.0.0.2", 32)
                 .addDnsServer("10.0.0.2")
@@ -136,6 +144,15 @@ class AngadVpnService : VpnService() {
 
     private suspend fun handlePacket(data: ByteArray, length: Int, outputStream: FileOutputStream) {
         if (length < 28) return
+        
+        val packetBytes = data.copyOf(length)
+        val flowId = 12345L // Dummy flowId
+        val isUpload = true
+        val score = com.sonusid.localvpntunnel.MLBridge.analyzePacket(flowId, packetBytes, isUpload)
+        if (score >= 0.5f) {
+            Log.w(TAG, "Native ML engine dropped packet. Score: $score")
+            return
+        }
         
         val ihl = (data[0].toInt() and 0x0F) * 4
         val protocol = data[9].toInt() and 0xFF
