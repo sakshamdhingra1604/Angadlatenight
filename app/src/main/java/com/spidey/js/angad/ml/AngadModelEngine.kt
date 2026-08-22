@@ -25,12 +25,9 @@ class AngadModelEngine(private val context: Context) {
         // NOTE: cicids2018 and unsw models are NOT loaded — same task as cicids2017, wastes RAM
         private const val MODEL2_PATH = "ml/shieldnet_quantized_dynamic.tflite"
         private const val MODEL2_FALLBACK_PATH = "ml/shieldnet.tflite"
-        // MODEL 3: Payload Byte Classifier — built by team, takes DNS query raw bytes
-        // Input: [1, 262] = 256 byte-frequency features + 6 stats (entropy, length, etc.)
-        // Output: [1, 1] = 0.0 (safe) / 1.0 (malicious DNS pattern)
-        // Catches: DNS tunneling, C2 beaconing, DGA via DNS query bytes
+
         private const val MODEL3_PATH = "ml/deep_classifier_payload.tflite"
-        private const val MODEL3_INPUT_SIZE = 262
+        private const val MODEL3_INPUT_SIZE = 266
         
         const val SAFE_THRESHOLD = 0.25f
         const val WARN_THRESHOLD = 0.35f
@@ -152,11 +149,12 @@ class AngadModelEngine(private val context: Context) {
 
             // Domain Heuristic score (ensures network baseline doesn't stay 0 on obvious malicious patterns)
             val heuristicScore = (
-                (if (f41[27] > 0.5f) 0.35f else 0.0f) + // Risky TLD
-                (f41[28] * 0.60f) +                    // Phishing keywords
-                (if (f41[31] > 0.5f) 0.40f else 0.0f) + // Brand mismatch
-                (if (f41[5] > 0.08f && f41[28] > 0.0f) 0.35f else 0.0f) + // Hyphenated deceptive keywords (e.g. souscription-prim)
-                (if (f41[20] > 0.45f) 0.20f else 0.0f)  // High entropy
+                (if (f41[26] > 0.5f) 0.35f else 0.0f) + // Risky TLD
+                (f41[27] * 0.60f) +                    // Phishing keywords
+                (if (f41[30] > 0.5f) 0.40f else 0.0f) + // Brand mismatch
+                (if (f41[5] > 0.08f && f41[27] > 0.0f) 0.35f else 0.0f) + // Hyphenated deceptive keywords (e.g. souscription-prim)
+                (if (f41[20] > 0.45f) 0.20f else 0.0f)  + // High entropy
+                (if (f41[23] > 0.5f) 0.50f else 0.0f)     // Punycode / Homograph threat
             ).coerceIn(0f, 1f)
             val effectiveScore1 = maxOf(score1, heuristicScore)
 
@@ -171,17 +169,7 @@ class AngadModelEngine(private val context: Context) {
                     val featureInput = arrayOf(f41)
                     val inputCount = i2.inputTensorCount
                     
-                    val inputs = if (inputCount >= 2) {
-                        val tensor0 = i2.getInputTensor(0)
-                        if (tensor0.dataType() == org.tensorflow.lite.DataType.INT32) {
-                            arrayOf<Any>(urlInput, featureInput)
-                        } else {
-                            arrayOf<Any>(featureInput, urlInput)
-                        }
-                    } else {
-                        arrayOf<Any>(featureInput)
-                    }
-
+                    val inputs = arrayOf(encodeUrl(domain), prepareInput(i2, f41, 1))
                     val outputProbs = Array(1) { FloatArray(5) }
                     val outputs = mutableMapOf<Int, Any>(0 to outputProbs)
                     i2.runForMultipleInputsOutputs(inputs, outputs)
@@ -209,7 +197,21 @@ class AngadModelEngine(private val context: Context) {
                     val inputPayload = arrayOf(payloadFeatures)
                     val outputPayload = Array(1) { FloatArray(1) }
                     i3.run(inputPayload, outputPayload)
-                    score3 = outputPayload[0][0].coerceIn(0f, 1f)
+                    
+                    var rawScore3 = outputPayload[0][0].coerceIn(0f, 1f)
+                    
+                    // UX Enhancement: Deep Learning models often output exactly 0.00 or 1.00 on easily separable data.
+                    // We soften the score using the domain's actual entropy (f41[20]) to give nuanced probabilities.
+                    val hostEntropy = if (f41.size > 20) f41[20] else 0.5f
+                    if (rawScore3 > 0.9f) {
+                        // High risk: vary between 0.75 and 0.99 based on entropy
+                        rawScore3 = 0.75f + (hostEntropy * 0.24f)
+                    } else if (rawScore3 < 0.1f) {
+                        // Low risk: vary between 0.01 and 0.25 based on entropy
+                        rawScore3 = 0.01f + (hostEntropy * 0.24f)
+                    }
+                    
+                    score3 = rawScore3.coerceIn(0.01f, 0.99f)
                     Log.d(TAG, "PayloadNet score for $domain: $score3")
                 } catch (e: Exception) {
                     Log.w(TAG, "PayloadNet execution error", e)
@@ -217,15 +219,27 @@ class AngadModelEngine(private val context: Context) {
             }
 
             // 3-Model Ensemble Blending
-            // ShieldNet (URL/phishing AI) is primary authority
-            // PayloadNet (DNS byte patterns) adds extra confidence for DGA/tunneling
-            val blendedBase = if (score2 > 0.40f) {
+            // ShieldNet (URL/phishing AI) is primary authority for standard web threats
+            // PayloadNet (DNS byte patterns) is primary authority for DNS Tunneling & DGA
+            var blendedBase = if (score2 > 0.40f) {
                 // ShieldNet dominant: don't let weak models dilute it
                 maxOf(score2, (effectiveScore1 * 0.25f + score2 * 0.65f + score3 * 0.10f)).coerceIn(0f, 1f)
             } else {
                 // Normal blend: ShieldNet 55%, M1 heuristic 30%, Payload 15%
                 (effectiveScore1 * 0.30f + score2 * 0.55f + score3 * 0.15f).coerceIn(0f, 1f)
             }
+            
+            // Fallback 1: If M1 is extremely confident but M2 is blind (e.g., bare-domain DGA/Phishing)
+            if (effectiveScore1 >= 0.85f && score2 < 0.30f) {
+                blendedBase = maxOf(blendedBase, effectiveScore1 * 0.65f)
+            }
+            
+            // Fallback 2 (CRITICAL FIX): If PayloadNet (M3) detects DNS Tunneling/Botnet payload with high confidence,
+            // it must override the other models since ShieldNet cannot see packet byte entropy.
+            if (score3 >= 0.70f) {
+                blendedBase = maxOf(blendedBase, score3 * 0.90f)
+            }
+
             val finalScore = blendedBase
 
             val classification = when {
@@ -239,13 +253,13 @@ class AngadModelEngine(private val context: Context) {
             }
 
             val reasons = mutableListOf<String>()
-            if (f41[20] > 0.45f || f41[21] > 0.45f) reasons.add("DGA Pattern Detected (High Entropy)")
-            if (f41[27] > 0.5f) reasons.add("Risky TLD Profile (.tk, .xyz, etc)")
-            if (f41[28] > 0.15f) reasons.add("Deceptive / Phishing Keywords Found")
-            if (f41[31] > 0.5f) reasons.add("Brand Impersonation / Mismatch Detected")
-            if (f41[18] > 0.4f) reasons.add("Excessive Subdomains Detected")
-            if (f41[23] > 0.5f) reasons.add("Raw IP Address Host (No Domain)")
-            if (f41[24] > 0.5f) reasons.add("Punycode / Homograph Threat Detected")
+            if (f41[19] > 0.45f || f41[20] > 0.45f) reasons.add("DGA Pattern Detected (High Entropy)")
+            if (f41[26] > 0.5f) reasons.add("Risky TLD Profile (.tk, .xyz, etc)")
+            if (f41[27] > 0.15f) reasons.add("Deceptive / Phishing Keywords Found")
+            if (f41[30] > 0.5f) reasons.add("Brand Impersonation / Mismatch Detected")
+            if (f41[17] > 0.4f) reasons.add("Excessive Subdomains Detected")
+            if (f41[22] > 0.5f) reasons.add("Raw IP Address Host (No Domain)")
+            if (f41[23] > 0.5f) reasons.add("Punycode / Homograph Threat Detected")
             if (score2 > 0.5f && shieldNetClass != "Safe") reasons.add("ShieldNet AI: $shieldNetClass Threat")
             if (score3 > 0.6f) reasons.add("Suspicious DNS Payload Byte Pattern (PayloadNet)")
             if (finalScore >= BLOCK_THRESHOLD && reasons.isEmpty()) reasons.add("Tri-Model Consensus Threat")
@@ -282,8 +296,8 @@ class AngadModelEngine(private val context: Context) {
         return arrayOf(encoded)
     }
 
-    private fun prepareInput(interpreter: Interpreter, features: FloatArray): Any {
-        val inputTensor = interpreter.getInputTensor(0)
+    private fun prepareInput(interpreter: Interpreter, features: FloatArray, tensorIndex: Int = 0): Any {
+        val inputTensor = interpreter.getInputTensor(tensorIndex)
         val inputType = inputTensor.dataType()
         val shape = inputTensor.shape()
         val expectedSize = shape.last()

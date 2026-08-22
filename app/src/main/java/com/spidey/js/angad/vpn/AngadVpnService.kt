@@ -288,12 +288,13 @@ class AngadVpnService : VpnService() {
         verdict: AngadModelEngine.ModelVerdict
     ) {
         serviceScope.launch {
+            var socket: java.net.DatagramSocket? = null
             try {
-                val socket = DatagramSocket()
+                socket = java.net.DatagramSocket()
                 protect(socket)
-                socket.send(DatagramPacket(data, dnsOffset, dnsLen, InetAddress.getByName(REAL_DNS_IP), 53))
+                socket.send(java.net.DatagramPacket(data, dnsOffset, dnsLen, InetAddress.getByName(REAL_DNS_IP), 53))
                 val buffer = ByteArray(4096)
-                val packet = DatagramPacket(buffer, buffer.size)
+                val packet = java.net.DatagramPacket(buffer, buffer.size)
                 socket.soTimeout = 5000
                 socket.receive(packet)
 
@@ -302,10 +303,15 @@ class AngadVpnService : VpnService() {
                 logDomainEvent(domain, "DNS", appInfo, verdict, false, resolvedIp)
 
                 val ipResponse = buildIpUdpPacket(dstIp, dstPort, srcIp, srcPort, packet.data, packet.length)
-                withContext(Dispatchers.IO) { outputStream.write(ipResponse) }
-                socket.close()
+                withContext(kotlinx.coroutines.Dispatchers.IO) { outputStream.write(ipResponse) }
             } catch (e: Exception) {
                 logDomainEvent(domain, "DNS", appInfo, verdict, false, "")
+            } finally {
+                try {
+                    socket?.close()
+                } catch (e: Exception) {
+                    // Ignore close errors
+                }
             }
         }
     }

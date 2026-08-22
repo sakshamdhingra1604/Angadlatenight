@@ -10,10 +10,10 @@ interface DnsEventDao {
     @Insert
     suspend fun insert(event: DnsEvent)
 
-    @Query("SELECT * FROM dns_events ORDER BY timestamp DESC")
+    @Query("SELECT * FROM dns_events ORDER BY timestamp DESC LIMIT 3000")
     fun getAllEvents(): Flow<List<DnsEvent>>
 
-    @Query("SELECT * FROM dns_events WHERE isThreat = 1 ORDER BY timestamp DESC")
+    @Query("SELECT * FROM dns_events WHERE isThreat = 1 ORDER BY timestamp DESC LIMIT 1000")
     fun getThreatLogs(): Flow<List<DnsEvent>>
     
     @Query("SELECT COUNT(*) FROM dns_events")

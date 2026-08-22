@@ -128,60 +128,61 @@ object DomainFeatureExtractor {
         features[15] = (letterCount.toFloat() / 50f).coerceIn(0f, 1f)
         features[16] = (letterCount.toFloat() / lengthNonZero.toFloat()).coerceIn(0f, 1f)
 
-        // 18-19: Subdomain features
-        features[18] = (subdomainCount.toFloat() / 5f).coerceIn(0f, 1f)
-        features[19] = (subdomains.length.toFloat() / 50f).coerceIn(0f, 1f)
+        // 17-18: Subdomain features
+        features[17] = (subdomainCount.toFloat() / 5f).coerceIn(0f, 1f)
+        features[18] = (subdomains.length.toFloat() / 50f).coerceIn(0f, 1f)
 
-        // 20-22: Entropy
-        features[20] = (calculateEntropy(rawUrl) / 8f).coerceIn(0f, 1f)
-        features[21] = (calculateEntropy(host) / 8f).coerceIn(0f, 1f)
-        features[22] = (calculateEntropy(path) / 8f).coerceIn(0f, 1f)
+        // 19-21: Entropy
+        features[19] = (calculateEntropy(rawUrl) / 8f).coerceIn(0f, 1f)
+        features[20] = (calculateEntropy(host) / 8f).coerceIn(0f, 1f)
+        features[21] = (calculateEntropy(path) / 8f).coerceIn(0f, 1f)
 
-        // 23-26: Flags
-        features[23] = if (isIpAddress(host)) 1.0f else 0.0f
-        features[24] = if (host.contains("xn--")) 1.0f else 0.0f
-        features[25] = if (rawUrl.contains(":[0-9]+".toRegex())) 1.0f else 0.0f
-        features[26] = if (scheme == "https") 1.0f else 0.0f
+        // 22-25: Flags
+        features[22] = if (isIpAddress(host)) 1.0f else 0.0f
+        features[23] = if (host.contains("xn--")) 1.0f else 0.0f
+        features[24] = if (rawUrl.contains(":[0-9]+".toRegex())) 1.0f else 0.0f
+        features[25] = if (scheme == "https") 1.0f else 0.0f
 
-        // 27-28: TLD Risk & Keywords
-        features[27] = if (RISKY_TLDS.any { host.endsWith(it) }) 1.0f else 0.0f
+        // 26-27: TLD Risk & Keywords
+        features[26] = if (RISKY_TLDS.any { host.endsWith(it) }) 1.0f else 0.0f
         val tokens = rawUrl.lowercase().split('.', '-', '_', '/', '?', '=', '&', '@', ':').filter { it.isNotBlank() }
         val kwCount = SUSPICIOUS_KEYWORDS.count { kw -> tokens.any { it == kw || (kw.length >= 6 && it.contains(kw)) } }
-        features[28] = (kwCount.toFloat() / 4f).coerceIn(0f, 1f)
+        features[27] = (kwCount.toFloat() / 4f).coerceIn(0f, 1f)
 
-        // 29-31: Brand checks (detects brand impersonation like verify-paypal-account.tk)
+        // 28-30: Brand checks (detects brand impersonation like verify-paypal-account.tk)
         val matchedBrand = POPULAR_BRANDS.firstOrNull { host.contains(it) || path.lowercase().contains(it) }
         val isOfficialBrandDomain = matchedBrand != null && (
-            host == "$matchedBrand.com" || host.endsWith(".$matchedBrand.com") ||
-            host == "$matchedBrand.net" || host.endsWith(".$matchedBrand.net") ||
-            host == "$matchedBrand.org" || host.endsWith(".$matchedBrand.org")
+            host == "$matchedBrand.com" || host.endsWith(".$matchedBrand.com") || host.endsWith("-$matchedBrand.com") ||
+            host == "$matchedBrand.net" || host.endsWith(".$matchedBrand.net") || host.endsWith("-$matchedBrand.net") ||
+            host == "$matchedBrand.org" || host.endsWith(".$matchedBrand.org") || host.endsWith("-$matchedBrand.org")
         )
         val brandInSub = POPULAR_BRANDS.any { subdomains.contains(it) }
         val brandInPath = POPULAR_BRANDS.any { path.lowercase().contains(it) }
         val brandMismatch = matchedBrand != null && !isOfficialBrandDomain
 
-        features[29] = if (brandInSub) 1.0f else 0.0f
-        features[30] = if (brandInPath || (matchedBrand != null && !isOfficialBrandDomain)) 1.0f else 0.0f
-        features[31] = if (brandMismatch) 1.0f else 0.0f
+        features[28] = if (brandInSub) 1.0f else 0.0f
+        features[29] = if (brandInPath || (matchedBrand != null && !isOfficialBrandDomain)) 1.0f else 0.0f
+        features[30] = if (brandMismatch) 1.0f else 0.0f
 
-        // 32-34: Linguistic patterns
+        // 31-33: Linguistic patterns
         val vowels = rawUrl.count { it.lowercaseChar() in "aeiou" }
         val consonants = rawUrl.count { it.isLetter() && it.lowercaseChar() !in "aeiou" }
-        features[32] = (calculateMaxConsonants(host).toFloat() / 15f).coerceIn(0f, 1f)
-        features[33] = (vowels.toFloat() / lengthNonZero.toFloat()).coerceIn(0f, 1f)
-        features[34] = (vowels.toFloat() / consonants.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+        features[31] = (calculateMaxConsonants(host).toFloat() / 15f).coerceIn(0f, 1f)
+        features[32] = (vowels.toFloat() / lengthNonZero.toFloat()).coerceIn(0f, 1f)
+        features[33] = (vowels.toFloat() / consonants.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
 
-        // 35-36: Encoding & repetition
-        features[35] = if (rawUrl.contains("%[0-9a-fA-F]{2}".toRegex())) 1.0f else 0.0f
-        features[36] = (calculateMaxRepeatedChar(rawUrl).toFloat() / 10f).coerceIn(0f, 1f)
+        // 34-35: Encoding & repetition
+        features[34] = if (rawUrl.contains("%[0-9a-fA-F]{2}".toRegex())) 1.0f else 0.0f
+        features[35] = (calculateMaxRepeatedChar(rawUrl).toFloat() / 10f).coerceIn(0f, 1f)
 
-        // 37-40: Advanced URL semantics
-        features[37] = if (COMMON_TLDS.any { subdomains.contains(it) || path.contains(it) }) 1.0f else 0.0f
+        // 36-40: Advanced URL semantics
+        features[36] = if (COMMON_TLDS.any { subdomains.contains(it) || path.contains(it) }) 1.0f else 0.0f
         val pathSegments = path.split('/').filter { it.isNotBlank() }
-        features[38] = (pathSegments.size.toFloat() / 10f).coerceIn(0f, 1f)
+        features[37] = (pathSegments.size.toFloat() / 10f).coerceIn(0f, 1f)
         val queryParams = query.split('&').filter { it.isNotBlank() }
-        features[39] = (queryParams.size.toFloat() / 10f).coerceIn(0f, 1f)
-        features[40] = if (DANGEROUS_EXTENSIONS.any { rawUrl.lowercase().endsWith(it) || path.lowercase().endsWith(it) }) 1.0f else (registeredDomain.length.toFloat() / 50f).coerceIn(0f, 1f)
+        features[38] = (queryParams.size.toFloat() / 10f).coerceIn(0f, 1f)
+        features[39] = if (DANGEROUS_EXTENSIONS.any { rawUrl.lowercase().endsWith(it) || path.lowercase().endsWith(it) }) 1.0f else 0.0f
+        features[40] = (registeredDomain.length.toFloat() / 50f).coerceIn(0f, 1f)
 
         return features
     }
